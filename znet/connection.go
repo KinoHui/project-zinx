@@ -83,7 +83,7 @@ func (c *Connection) Start() {
 // 停止连接，结束当前连接状态M
 func (c *Connection) Stop() {
 	//1. 如果当前链接已经关闭
-	if c.isClosed == true {
+	if c.isClosed {
 		return
 	}
 	c.isClosed = true
