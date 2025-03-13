@@ -8,8 +8,12 @@ type IConnection interface {
 	Start()
 	//停⽌止连接，结束当前连接状态M
 	Stop()
-	//从当前连接获取原始的socket TCPConn GetTCPConnection() *net.TCPConn //获取当前连接ID
-	GetConnID() uint32 //获取远程客户端地址信息 RemoteAddr() net.Addr
+	//从当前连接获取原始的socket TCPConn
+	GetTCPConnection() *net.TCPConn
+	//获取当前连接ID
+	GetConnID() uint32
+	//获取远程客户端地址信息
+	RemoteAddr() net.Addr
 }
 
 // 定义⼀一个统⼀一处理理链接业务的接⼝口
