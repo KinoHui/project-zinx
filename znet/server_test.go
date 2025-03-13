@@ -70,7 +70,7 @@ func ClientTest() {
 			return
 		}
 
-		fmt.Printf(" server call back : %s, cnt = %d\n", buf, cnt)
+		fmt.Printf(" server call back :\n %s, cnt = %d\n", buf, cnt)
 
 		time.Sleep(1 * time.Second)
 	}
