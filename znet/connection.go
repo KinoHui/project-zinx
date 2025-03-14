@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 
+	"github.com/KinoHui/project-zinx/utils"
 	"github.com/KinoHui/project-zinx/ziface"
 )
 
@@ -22,6 +23,8 @@ type Connection struct {
 
 	//告知该链接已经退出/停止的channel
 	ExitBuffChan chan bool
+	//无缓冲管道，用于读、写两个goroutine之间的消息通信
+	msgChan chan []byte
 }
 
 // 创建连接的方法
@@ -32,14 +35,32 @@ func NewConntion(conn *net.TCPConn, connID uint32, msgHandler ziface.IMsgHandle)
 		isClosed:     false,
 		MsgHandler:   msgHandler,
 		ExitBuffChan: make(chan bool, 1),
+		msgChan:      make(chan []byte), //msgChan初始化
 	}
 
 	return c
 }
 
+// 启动连接，让当前连接开始工作
+func (c *Connection) Start() {
+
+	//1 开启用户从客户端读取数据流程的Goroutine
+	go c.StartReader()
+	//2 开启用于写回客户端数据流程的Goroutine
+	go c.StartWriter()
+
+	for {
+		select {
+		case <-c.ExitBuffChan:
+			//得到退出消息，不再阻塞
+			return
+		}
+	}
+}
+
 /* 处理conn读数据的Goroutine */
 func (c *Connection) StartReader() {
-	fmt.Println("Reader Goroutine is  running")
+	fmt.Printf("[Reader Goroutine is  running by Conn %v ]\n", c.GetConnID())
 	defer fmt.Println(c.RemoteAddr().String(), " conn reader exit!")
 	defer c.Stop()
 
@@ -81,29 +102,40 @@ func (c *Connection) StartReader() {
 			msg:  msg, //将之前的buf 改成 msg
 		}
 		//从路由Routers 中找到注册绑定Conn的对应Handle
-		go func(request ziface.IRequest) {
-			//执行注册的路由方法
-			c.MsgHandler.DoMsgHandler(request)
-		}(&req)
+		if utils.GlobalObject.WorkerPoolSize > 0 {
+			//已经启动工作池机制，将消息交给Worker处理
+			c.MsgHandler.SendMsgToTaskQueue(&req)
+		} else {
+			//从绑定好的消息和对应的处理方法中执行对应的Handle方法
+			go c.MsgHandler.DoMsgHandler(&req)
+		}
 	}
 }
 
-// 启动连接，让当前连接开始工作
-func (c *Connection) Start() {
+/*
+写消息Goroutine， 用户将数据发送给客户端
+*/
+func (c *Connection) StartWriter() {
 
-	//开启处理该链接读取到客户端数据之后的请求业务
-	go c.StartReader()
+	fmt.Println("[Writer Goroutine is running]")
+	defer fmt.Println(c.RemoteAddr().String(), "[conn Writer exit!]")
 
 	for {
 		select {
+		case data := <-c.msgChan:
+			//有数据要写给客户端
+			if _, err := c.Conn.Write(data); err != nil {
+				fmt.Println("Send Data error:, ", err, " Conn Writer exit")
+				return
+			}
 		case <-c.ExitBuffChan:
-			//得到退出消息，不再阻塞
+			//conn已经关闭
 			return
 		}
 	}
 }
 
-// 直接将Message数据发送数据给远程的TCP客户端
+// 将Message数据发送数据给Writer Goroutine
 func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 	if c.isClosed == true {
 		return errors.New("Connection closed when send msg")
@@ -116,12 +148,8 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 		return errors.New("Pack error msg ")
 	}
 
-	//写回客户端
-	if _, err := c.Conn.Write(msg); err != nil {
-		fmt.Println("Write msg id ", msgId, " error ")
-		c.ExitBuffChan <- true
-		return errors.New("conn Write error")
-	}
+	//将msg传给Writer
+	c.msgChan <- msg //将之前直接回写给conn.Write的方法 改为 发送给Channel 供Writer读取
 
 	return nil
 }
